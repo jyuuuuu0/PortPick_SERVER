@@ -26,6 +26,9 @@ public class CustomOAuth2UserService implements OAuth2UserService<OAuth2UserRequ
         OAuth2UserService<OAuth2UserRequest, OAuth2User> delegate = new DefaultOAuth2UserService();
         OAuth2User oAuth2User = delegate.loadUser(userRequest);
 
+        if (oAuth2User == null) {
+            throw new OAuth2AuthenticationException("구글에서 유저 정보를 불러오지 못했습니다.");
+        }
         // 1. 구글 로그인인지 카카오 로그인인지 구분하는 ID (여기선 "google"이 들어옴)
         String registrationId = userRequest.getClientRegistration().getRegistrationId();
 
