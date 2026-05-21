@@ -1,5 +1,6 @@
 package com.example.PortPick_SERVER.jwt;
 
+import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,7 +16,6 @@ public class JwtProvider {
     private final SecretKey secretKey;
     private final long expirationTime;
 
-    // application.properties에 적은 설정값들을 자동으로 읽어옵니다.
     public JwtProvider(
             @Value("${jwt.secret}") String secret,
             @Value("${jwt.expiration}") long expirationTime) {
@@ -23,16 +23,38 @@ public class JwtProvider {
         this.expirationTime = expirationTime;
     }
 
-    // ⚡ 유저 이메일을 기반으로 일하는 만료시간 30분짜리 Access Token 발급기
+    // 1. 토큰 발급기
     public String createAccessToken(String email) {
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + expirationTime);
 
         return Jwts.builder()
-                .subject(email) // 토큰 주인의 이메일 저장
-                .issuedAt(now)   // 토큰 발행 시간
-                .expiration(expiryDate) // 토큰 만료 시간
-                .signWith(secretKey)    // 비밀키로 암호화 사인
+                .subject(email)
+                .issuedAt(now)
+                .expiration(expiryDate)
+                .signWith(secretKey)
                 .compact();
+    }
+
+    // 2. ⚡ 토큰이 유효한지 검증하는 함수 (위조/만료 체크)
+    public boolean validateToken(String token) {
+        try {
+            Jwts.parser().verifyWith(secretKey).build().parseSignedClaims(token);
+            return true;
+        } catch (Exception e) {
+            // 토큰이 위조되었거나 만료되면 이쪽으로 빠집니다.
+            return false;
+        }
+    }
+
+    // 3. ⚡ 토큰 내부에서 유저 이메일(Subject)을 꺼내는 함수
+    public String getEmailFromToken(String token) {
+        Claims claims = Jwts.parser()
+                .verifyWith(secretKey)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
+
+        return claims.getSubject();
     }
 }

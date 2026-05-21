@@ -1,5 +1,6 @@
 package com.example.PortPick_SERVER.config;
 
+import com.example.PortPick_SERVER.filter.JwtAuthenticationFilter;
 import com.example.PortPick_SERVER.handler.OAuth2SuccessHandler;
 import com.example.PortPick_SERVER.service.CustomOAuth2UserService;
 import lombok.RequiredArgsConstructor;
@@ -10,6 +11,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
 @EnableWebSecurity
@@ -17,7 +19,8 @@ import org.springframework.security.web.SecurityFilterChain;
 public class SecurityConfig {
 
     private final CustomOAuth2UserService customOAuth2UserService;
-    private final OAuth2SuccessHandler oAuth2SuccessHandler; // ⚡ 핸들러 주입!
+    private final OAuth2SuccessHandler oAuth2SuccessHandler;
+    private final JwtAuthenticationFilter jwtAuthenticationFilter; // ⚡ 문지기 필터 주입
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -32,9 +35,11 @@ public class SecurityConfig {
                 .oauth2Login(oauth2 -> oauth2
                         .loginProcessingUrl("/api/v1/auth/login/oauth2/code/*")
                         .userInfoEndpoint(userInfo -> userInfo.userService(customOAuth2UserService))
-                        // ⚡ 로그인 완벽히 성공하면 이 핸들러를 실행해라! 추가
                         .successHandler(oAuth2SuccessHandler)
-                );
+                )
+
+                // ⚡ 핵심: 스프링 시큐리티가 기본으로 쓰는 필터보다 '앞에' 우리가 만든 JWT 문지기를 세워둡니다!
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
