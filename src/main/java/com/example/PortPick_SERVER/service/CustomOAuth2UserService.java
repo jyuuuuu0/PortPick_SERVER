@@ -3,6 +3,7 @@ package com.example.PortPick_SERVER.service;
 import com.example.PortPick_SERVER.model.User;
 import com.example.PortPick_SERVER.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
@@ -20,6 +21,8 @@ import java.util.Map;
 public class CustomOAuth2UserService implements OAuth2UserService<OAuth2UserRequest, OAuth2User> {
 
     private final UserRepository userRepository;
+    @Value("${app.profile.default-image-url:/images/default-profile.svg}")
+    private String defaultProfileImageUrl;
 
     @Override
     public OAuth2User loadUser(OAuth2UserRequest userRequest) throws OAuth2AuthenticationException {
@@ -57,11 +60,14 @@ public class CustomOAuth2UserService implements OAuth2UserService<OAuth2UserRequ
 
     private User saveOrUpdate(String email, String name, String provider) {
         User user = userRepository.findByEmail(email)
-                .map(entity -> entity.update(name))
+                .map(entity -> entity.isSignupCompleted() ? entity : entity.updateOAuthName(name))
                 .orElse(User.builder()
                         .email(email)
                         .name(name)
                         .provider(provider)
+                        .signupCompleted(false)
+                        .profileImageUrl(defaultProfileImageUrl)
+                        .customProfileImage(false)
                         .build());
 
         return userRepository.save(user);

@@ -32,10 +32,12 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/", "/index.html", "/error").permitAll()
+                        .requestMatchers("/images/**", "/uploads/profiles/**").permitAll()
                         .requestMatchers("/oauth2/authorization/**").permitAll()
                         .requestMatchers("/api/v1/auth/login/oauth2/code/**").permitAll()
                         .requestMatchers("/api/v1/auth/login/failure").permitAll()
                         .requestMatchers("/api/v1/auth/me", "/api/v1/auth/logout").authenticated()
+                        .requestMatchers("/api/v1/profile/**").authenticated()
                         .anyRequest().authenticated()
                 )
                 .oauth2Login(oauth2 -> oauth2

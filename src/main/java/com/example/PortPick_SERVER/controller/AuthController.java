@@ -39,7 +39,8 @@ public class AuthController {
                 true,
                 user.getEmail(),
                 user.getName(),
-                user.getProvider()
+                user.getProvider(),
+                user.isSignupCompleted()
         ));
     }
 
@@ -61,7 +62,8 @@ public class AuthController {
             boolean authenticated,
             String email,
             String name,
-            String provider
+            String provider,
+            boolean signupCompleted
     ) {
     }
 }
