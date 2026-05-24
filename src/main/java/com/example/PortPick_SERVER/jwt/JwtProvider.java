@@ -57,4 +57,8 @@ public class JwtProvider {
 
         return claims.getSubject();
     }
+
+    public long getExpirationTime() {
+        return expirationTime;
+    }
 }
