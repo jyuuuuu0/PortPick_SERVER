@@ -9,10 +9,12 @@ import com.example.PortPick_SERVER.model.User;
 import com.example.PortPick_SERVER.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -45,42 +47,48 @@ public class ProfileService {
         return ProfileResponse.from(getUser(email));
     }
 
+    @Transactional
     public ProfileResponse completeSignup(String email, ProfileUpsertRequest request, MultipartFile profileImage) {
         User user = getUser(email);
-        ProfileDraft profileDraft = buildProfileDraft(request, profileImage, user);
-        user.completeSignup(
-                profileDraft.name(),
-                profileDraft.organizationName(),
-                profileDraft.noOrganization(),
-                profileDraft.jobRole(),
-                profileDraft.careerType(),
-                profileDraft.careerRange(),
-                profileDraft.profileImageUrl(),
-                profileDraft.customProfileImage()
-        );
-        deleteProfileImageIfNeeded(profileDraft.oldCustomImageUrlToDelete());
-        return ProfileResponse.from(userRepository.save(user));
+        if (user.isSignupCompleted()) {
+            throw new IllegalArgumentException("이미 회원가입이 완료된 사용자입니다.");
+        }
+
+        return saveProfile(user, request, profileImage);
     }
 
+    @Transactional
     public ProfileResponse updateMyProfile(String email, ProfileUpsertRequest request, MultipartFile profileImage) {
         User user = getUser(email);
         if (!user.isSignupCompleted()) {
             throw new IllegalArgumentException("회원가입을 먼저 완료해 주세요.");
         }
 
+        return saveProfile(user, request, profileImage);
+    }
+
+    private ProfileResponse saveProfile(User user, ProfileUpsertRequest request, MultipartFile profileImage) {
         ProfileDraft profileDraft = buildProfileDraft(request, profileImage, user);
-        user.completeSignup(
-                profileDraft.name(),
-                profileDraft.organizationName(),
-                profileDraft.noOrganization(),
-                profileDraft.jobRole(),
-                profileDraft.careerType(),
-                profileDraft.careerRange(),
-                profileDraft.profileImageUrl(),
-                profileDraft.customProfileImage()
-        );
-        deleteProfileImageIfNeeded(profileDraft.oldCustomImageUrlToDelete());
-        return ProfileResponse.from(userRepository.save(user));
+
+        try {
+            user.completeSignup(
+                    profileDraft.name(),
+                    profileDraft.organizationName(),
+                    profileDraft.noOrganization(),
+                    profileDraft.jobRole(),
+                    profileDraft.careerType(),
+                    profileDraft.careerRange(),
+                    profileDraft.profileImageUrl(),
+                    profileDraft.customProfileImage()
+            );
+
+            User savedUser = userRepository.save(user);
+            deleteProfileImageIfNeeded(profileDraft.oldCustomImageUrlToDelete());
+            return ProfileResponse.from(savedUser);
+        } catch (RuntimeException exception) {
+            deleteProfileImageIfNeeded(profileDraft.newCustomImageUrlToDeleteOnFailure());
+            throw exception;
+        }
     }
 
     private User getUser(String email) {
@@ -99,7 +107,9 @@ public class ProfileService {
 
         String name = requireText(request.getName(), "이름을 입력해 주세요.");
         boolean noOrganization = request.isNoOrganization();
-        String organizationName = noOrganization ? null : requireText(request.getOrganizationName(), "소속 직장(학교)을 입력해 주세요.");
+        String organizationName = noOrganization
+                ? null
+                : requireText(request.getOrganizationName(), "소속 직장(학교)을 입력해 주세요.");
         JobRole jobRole = JobRole.from(request.getJobRole());
         CareerType careerType = CareerType.from(request.getCareerType());
         CareerRange careerRange = resolveCareerRange(careerType, request.getCareerRange());
@@ -115,7 +125,8 @@ public class ProfileService {
                 careerRange,
                 imageDraft.profileImageUrl(),
                 imageDraft.customProfileImage(),
-                imageDraft.oldCustomImageUrlToDelete()
+                imageDraft.oldCustomImageUrlToDelete(),
+                imageDraft.newCustomImageUrlToDeleteOnFailure()
         );
     }
 
@@ -131,19 +142,19 @@ public class ProfileService {
         if (profileImage != null && !profileImage.isEmpty()) {
             String uploadedUrl = storeProfileImage(profileImage);
             String oldUrl = user.isCustomProfileImage() ? user.getProfileImageUrl() : null;
-            return new ImageDraft(uploadedUrl, true, oldUrl);
+            return new ImageDraft(uploadedUrl, true, oldUrl, uploadedUrl);
         }
 
         if (deleteProfileImage) {
             String oldUrl = user.isCustomProfileImage() ? user.getProfileImageUrl() : null;
-            return new ImageDraft(defaultProfileImageUrl, false, oldUrl);
+            return new ImageDraft(defaultProfileImageUrl, false, oldUrl, null);
         }
 
         if (StringUtils.hasText(user.getProfileImageUrl())) {
-            return new ImageDraft(user.getProfileImageUrl(), user.isCustomProfileImage(), null);
+            return new ImageDraft(user.getProfileImageUrl(), user.isCustomProfileImage(), null, null);
         }
 
-        return new ImageDraft(defaultProfileImageUrl, false, null);
+        return new ImageDraft(defaultProfileImageUrl, false, null, null);
     }
 
     private String storeProfileImage(MultipartFile profileImage) {
@@ -154,19 +165,23 @@ public class ProfileService {
             Files.createDirectories(profileUploadDirectory);
             String savedFilename = UUID.randomUUID() + "." + extension;
             Path target = profileUploadDirectory.resolve(savedFilename).normalize();
-            Files.copy(profileImage.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
+
+            try (InputStream inputStream = profileImage.getInputStream()) {
+                Files.copy(inputStream, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+
             return profileUploadUrlPrefix + "/" + savedFilename;
         } catch (IOException exception) {
             throw new IllegalStateException("프로필 이미지를 저장하지 못했습니다.");
         }
     }
 
-    private void deleteProfileImageIfNeeded(String oldCustomImageUrlToDelete) {
-        if (!StringUtils.hasText(oldCustomImageUrlToDelete)) {
+    private void deleteProfileImageIfNeeded(String imageUrlToDelete) {
+        if (!StringUtils.hasText(imageUrlToDelete)) {
             return;
         }
 
-        deleteStoredFile(oldCustomImageUrlToDelete);
+        deleteStoredFile(imageUrlToDelete);
     }
 
     private void deleteStoredFile(String imageUrl) {
@@ -220,14 +235,16 @@ public class ProfileService {
             CareerRange careerRange,
             String profileImageUrl,
             boolean customProfileImage,
-            String oldCustomImageUrlToDelete
+            String oldCustomImageUrlToDelete,
+            String newCustomImageUrlToDeleteOnFailure
     ) {
     }
 
     private record ImageDraft(
             String profileImageUrl,
             boolean customProfileImage,
-            String oldCustomImageUrlToDelete
+            String oldCustomImageUrlToDelete,
+            String newCustomImageUrlToDeleteOnFailure
     ) {
     }
 }
