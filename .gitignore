@@ -38,3 +38,4 @@ out/
 
 ### My Secret Files ###
 src/main/resources/application-secret.properties
+.env
