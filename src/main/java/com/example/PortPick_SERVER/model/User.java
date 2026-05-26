@@ -32,6 +32,9 @@ public class User {
     private String provider;
 
     @Column(nullable = false)
+    private String role;
+
+    @Column(nullable = false)
     private boolean signupCompleted;
 
     @Column
@@ -63,6 +66,7 @@ public class User {
             String email,
             String name,
             String provider,
+            String role,
             boolean signupCompleted,
             String organizationName,
             boolean noOrganization,
@@ -75,6 +79,7 @@ public class User {
         this.email = email;
         this.name = name;
         this.provider = provider;
+        this.role = role != null ? role : "ROLE_USER";
         this.signupCompleted = signupCompleted;
         this.organizationName = organizationName;
         this.noOrganization = noOrganization;

@@ -37,7 +37,7 @@ public class SecurityConfig {
                         .requestMatchers("/oauth2/authorization/**").permitAll()
                         .requestMatchers("/api/v1/auth/login/oauth2/code/**").permitAll()
                         .requestMatchers("/api/v1/auth/login/failure").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/portfolios/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/portfolios", "/api/v1/portfolios/*", "/api/v1/portfolios/*/likes").permitAll()
                         .requestMatchers("/api/v1/auth/me", "/api/v1/auth/logout").authenticated()
                         .requestMatchers("/api/v1/profile/**").authenticated()
                         .requestMatchers("/api/v1/portfolios/**").authenticated()

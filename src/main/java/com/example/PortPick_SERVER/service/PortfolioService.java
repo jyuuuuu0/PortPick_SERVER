@@ -2,9 +2,16 @@ package com.example.PortPick_SERVER.service;
 
 import com.example.PortPick_SERVER.dto.PortfolioCreateRequest;
 import com.example.PortPick_SERVER.dto.PortfolioDetailResponse;
+import com.example.PortPick_SERVER.dto.PortfolioLikeResponse;
+import com.example.PortPick_SERVER.dto.PortfolioSummaryResponse;
 import com.example.PortPick_SERVER.dto.PortfolioUpdateRequest;
+import com.example.PortPick_SERVER.model.CareerRange;
+import com.example.PortPick_SERVER.model.CareerType;
+import com.example.PortPick_SERVER.model.JobRole;
 import com.example.PortPick_SERVER.model.Portfolio;
+import com.example.PortPick_SERVER.model.PortfolioLike;
 import com.example.PortPick_SERVER.model.User;
+import com.example.PortPick_SERVER.repository.PortfolioLikeRepository;
 import com.example.PortPick_SERVER.repository.PortfolioRepository;
 import com.example.PortPick_SERVER.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,8 +31,13 @@ import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class PortfolioService {
@@ -36,20 +48,51 @@ public class PortfolioService {
     );
 
     private final PortfolioRepository portfolioRepository;
+    private final PortfolioLikeRepository portfolioLikeRepository;
     private final UserRepository userRepository;
     private final Path portfolioUploadDirectory;
     private final String portfolioUploadUrlPrefix;
 
     public PortfolioService(
             PortfolioRepository portfolioRepository,
+            PortfolioLikeRepository portfolioLikeRepository,
             UserRepository userRepository,
             @Value("${app.portfolio.upload-dir:uploads/portfolios}") String portfolioUploadDir,
             @Value("${app.portfolio.upload-url-prefix:/uploads/portfolios}") String portfolioUploadUrlPrefix
     ) {
         this.portfolioRepository = portfolioRepository;
+        this.portfolioLikeRepository = portfolioLikeRepository;
         this.userRepository = userRepository;
         this.portfolioUploadDirectory = Path.of(portfolioUploadDir).toAbsolutePath().normalize();
         this.portfolioUploadUrlPrefix = portfolioUploadUrlPrefix;
+    }
+
+    @Transactional(readOnly = true)
+    public List<PortfolioSummaryResponse> getPortfolios(
+            String email,
+            String jobRoleValue,
+            String careerTypeValue,
+            String careerRangeValue
+    ) {
+        JobRole jobRole = parseJobRole(jobRoleValue);
+        CareerType careerType = parseCareerType(careerTypeValue);
+        CareerRange careerRange = parseCareerRange(careerRangeValue);
+
+        List<Portfolio> portfolios = portfolioRepository.findAllByFilters(jobRole, careerType, careerRange);
+        List<Long> portfolioIds = portfolios.stream()
+                .map(Portfolio::getId)
+                .toList();
+
+        Map<Long, Long> likeCounts = getLikeCounts(portfolioIds);
+        Set<Long> likedPortfolioIds = getLikedPortfolioIds(email, portfolioIds);
+
+        return portfolios.stream()
+                .map(portfolio -> PortfolioSummaryResponse.from(
+                        portfolio,
+                        likeCounts.getOrDefault(portfolio.getId(), 0L),
+                        likedPortfolioIds.contains(portfolio.getId())
+                ))
+                .toList();
     }
 
     @Transactional
@@ -81,7 +124,8 @@ public class PortfolioService {
                 storedFile != null ? storedFile.originalFileName() : null
         );
 
-        return PortfolioDetailResponse.from(portfolioRepository.save(portfolio));
+        Portfolio savedPortfolio = portfolioRepository.save(portfolio);
+        return PortfolioDetailResponse.from(savedPortfolio, 0L, false);
     }
 
     @Transactional
@@ -98,7 +142,11 @@ public class PortfolioService {
         String description = requireText(request.getDescription(), "포트폴리오 설명을 입력해 주세요.");
 
         portfolio.updateText(title, description);
-        return PortfolioDetailResponse.from(portfolio);
+        return PortfolioDetailResponse.from(
+                portfolio,
+                portfolioLikeRepository.countByPortfolioId(portfolioId),
+                portfolioLikeRepository.existsByPortfolioIdAndUserId(portfolioId, user.getId())
+        );
     }
 
     @Transactional
@@ -113,8 +161,59 @@ public class PortfolioService {
     }
 
     @Transactional(readOnly = true)
-    public PortfolioDetailResponse getPortfolioDetail(Long portfolioId) {
-        return PortfolioDetailResponse.from(getPortfolio(portfolioId));
+    public PortfolioDetailResponse getPortfolioDetail(String email, Long portfolioId) {
+        Portfolio portfolio = getPortfolio(portfolioId);
+        User currentUser = findUser(email);
+        long likeCount = portfolioLikeRepository.countByPortfolioId(portfolioId);
+        boolean liked = currentUser != null
+                && portfolioLikeRepository.existsByPortfolioIdAndUserId(portfolioId, currentUser.getId());
+
+        return PortfolioDetailResponse.from(portfolio, likeCount, liked);
+    }
+
+    @Transactional
+    public PortfolioLikeResponse likePortfolio(String email, Long portfolioId) {
+        User user = getUser(email);
+        Portfolio portfolio = getPortfolio(portfolioId);
+
+        if (!portfolioLikeRepository.existsByPortfolioIdAndUserId(portfolioId, user.getId())) {
+            portfolioLikeRepository.save(new PortfolioLike(portfolio, user));
+        }
+
+        return buildLikeResponse(portfolioId, true);
+    }
+
+    @Transactional
+    public PortfolioLikeResponse unlikePortfolio(String email, Long portfolioId) {
+        User user = getUser(email);
+        getPortfolio(portfolioId);
+
+        portfolioLikeRepository.findByPortfolioIdAndUserId(portfolioId, user.getId())
+                .ifPresent(portfolioLikeRepository::delete);
+
+        return buildLikeResponse(portfolioId, false);
+    }
+
+    @Transactional(readOnly = true)
+    public PortfolioLikeResponse getPortfolioLikeStatus(String email, Long portfolioId) {
+        getPortfolio(portfolioId);
+        User currentUser = findUser(email);
+        boolean liked = currentUser != null
+                && portfolioLikeRepository.existsByPortfolioIdAndUserId(portfolioId, currentUser.getId());
+
+        return new PortfolioLikeResponse(
+                portfolioId,
+                portfolioLikeRepository.countByPortfolioId(portfolioId),
+                liked
+        );
+    }
+
+    private PortfolioLikeResponse buildLikeResponse(Long portfolioId, boolean liked) {
+        return new PortfolioLikeResponse(
+                portfolioId,
+                portfolioLikeRepository.countByPortfolioId(portfolioId),
+                liked
+        );
     }
 
     private User getUser(String email) {
@@ -126,8 +225,15 @@ public class PortfolioService {
                 .orElseThrow(() -> new IllegalStateException("Authenticated user was not found."));
     }
 
+    private User findUser(String email) {
+        if (!StringUtils.hasText(email)) {
+            return null;
+        }
+        return userRepository.findByEmail(email).orElse(null);
+    }
+
     private Portfolio getPortfolio(Long portfolioId) {
-        return portfolioRepository.findById(portfolioId)
+        return portfolioRepository.findWithUserById(portfolioId)
                 .orElseThrow(() -> new IllegalArgumentException("포트폴리오를 찾을 수 없습니다."));
     }
 
@@ -241,6 +347,44 @@ public class PortfolioService {
         } catch (IOException ignored) {
             // Ignore cleanup failures after delete.
         }
+    }
+
+    private Map<Long, Long> getLikeCounts(Collection<Long> portfolioIds) {
+        if (portfolioIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        return portfolioLikeRepository.countByPortfolioIds(portfolioIds).stream()
+                .collect(Collectors.toMap(
+                        PortfolioLikeRepository.PortfolioLikeCountProjection::getPortfolioId,
+                        PortfolioLikeRepository.PortfolioLikeCountProjection::getLikeCount
+                ));
+    }
+
+    private Set<Long> getLikedPortfolioIds(String email, Collection<Long> portfolioIds) {
+        if (!StringUtils.hasText(email) || portfolioIds.isEmpty()) {
+            return Collections.emptySet();
+        }
+
+        User user = findUser(email);
+        if (user == null) {
+            return Collections.emptySet();
+        }
+
+        return portfolioLikeRepository.findLikedPortfolioIdsByUserIdAndPortfolioIds(user.getId(), portfolioIds).stream()
+                .collect(Collectors.toSet());
+    }
+
+    private JobRole parseJobRole(String value) {
+        return StringUtils.hasText(value) ? JobRole.from(value) : null;
+    }
+
+    private CareerType parseCareerType(String value) {
+        return StringUtils.hasText(value) ? CareerType.from(value) : null;
+    }
+
+    private CareerRange parseCareerRange(String value) {
+        return StringUtils.hasText(value) ? CareerRange.from(value) : null;
     }
 
     private String extractExtension(String filename) {
