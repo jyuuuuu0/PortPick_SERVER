@@ -11,11 +11,14 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
@@ -67,6 +70,8 @@ public class PortfolioService {
         validateEmbedLink(embedLink);
 
         StoredFile storedFile = storePortfolioFile(file);
+        registerRollbackFileCleanup(storedFile);
+
         Portfolio portfolio = new Portfolio(
                 user,
                 title,
@@ -76,12 +81,7 @@ public class PortfolioService {
                 storedFile != null ? storedFile.originalFileName() : null
         );
 
-        try {
-            return PortfolioDetailResponse.from(portfolioRepository.save(portfolio));
-        } catch (RuntimeException exception) {
-            deleteStoredFileIfNeeded(storedFile != null ? storedFile.fileUrl() : null);
-            throw exception;
-        }
+        return PortfolioDetailResponse.from(portfolioRepository.save(portfolio));
     }
 
     @Transactional
@@ -109,7 +109,7 @@ public class PortfolioService {
 
         String fileUrl = portfolio.getFileUrl();
         portfolioRepository.delete(portfolio);
-        deleteStoredFileIfNeeded(fileUrl);
+        registerFileDeletionAfterCommit(fileUrl);
     }
 
     @Transactional(readOnly = true)
@@ -180,8 +180,41 @@ public class PortfolioService {
 
             return new StoredFile(portfolioUploadUrlPrefix + "/" + savedFilename, originalFilename);
         } catch (IOException exception) {
-            throw new IllegalStateException("포트폴리오 파일을 저장하지 못했습니다.");
+            throw new UncheckedIOException("포트폴리오 파일을 저장하지 못했습니다.", exception);
         }
+    }
+
+    private void registerRollbackFileCleanup(StoredFile storedFile) {
+        if (storedFile == null || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == STATUS_ROLLED_BACK) {
+                    deleteStoredFileIfNeeded(storedFile.fileUrl());
+                }
+            }
+        });
+    }
+
+    private void registerFileDeletionAfterCommit(String fileUrl) {
+        if (!StringUtils.hasText(fileUrl)) {
+            return;
+        }
+
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            deleteStoredFileIfNeeded(fileUrl);
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                deleteStoredFileIfNeeded(fileUrl);
+            }
+        });
     }
 
     private void deleteStoredFileIfNeeded(String fileUrl) {

@@ -30,8 +30,13 @@ public class WebResourceConfig implements WebMvcConfigurer {
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         registry.addResourceHandler(profileUploadUrlPrefix + "/**")
-                .addResourceLocations(profileUploadDir.toUri().toString());
+                .addResourceLocations(toResourceLocation(profileUploadDir));
         registry.addResourceHandler(portfolioUploadUrlPrefix + "/**")
-                .addResourceLocations(portfolioUploadDir.toUri().toString());
+                .addResourceLocations(toResourceLocation(portfolioUploadDir));
+    }
+
+    private String toResourceLocation(Path directory) {
+        String location = directory.toUri().toString();
+        return location.endsWith("/") ? location : location + "/";
     }
 }
