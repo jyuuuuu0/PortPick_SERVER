@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -32,12 +33,14 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/", "/index.html", "/error").permitAll()
-                        .requestMatchers("/images/**", "/uploads/profiles/**").permitAll()
+                        .requestMatchers("/images/**", "/uploads/profiles/**", "/uploads/portfolios/**").permitAll()
                         .requestMatchers("/oauth2/authorization/**").permitAll()
                         .requestMatchers("/api/v1/auth/login/oauth2/code/**").permitAll()
                         .requestMatchers("/api/v1/auth/login/failure").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/portfolios/*").permitAll()
                         .requestMatchers("/api/v1/auth/me", "/api/v1/auth/logout").authenticated()
                         .requestMatchers("/api/v1/profile/**").authenticated()
+                        .requestMatchers("/api/v1/portfolios/**").authenticated()
                         .anyRequest().authenticated()
                 )
                 .oauth2Login(oauth2 -> oauth2
