@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -35,4 +36,21 @@ public interface PortfolioRepository extends JpaRepository<Portfolio, Long> {
             where p.id = :portfolioId
             """)
     Optional<Portfolio> findWithUserById(@Param("portfolioId") Long portfolioId);
+
+    @Query("""
+            select p
+            from Portfolio p
+            join fetch p.user
+            where p.user.id = :userId
+            order by p.createdAt desc
+            """)
+    List<Portfolio> findAllByUserId(@Param("userId") Long userId);
+
+    @Query("""
+            select p
+            from Portfolio p
+            join fetch p.user
+            where p.id in :portfolioIds
+            """)
+    List<Portfolio> findAllWithUserByIdIn(@Param("portfolioIds") Collection<Long> portfolioIds);
 }
