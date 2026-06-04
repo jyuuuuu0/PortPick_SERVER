@@ -35,6 +35,8 @@ out/
 
 ### VS Code ###
 .vscode/
+uploads/
 
 ### My Secret Files ###
 src/main/resources/application-secret.properties
+.env
