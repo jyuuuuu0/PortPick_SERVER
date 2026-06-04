@@ -68,7 +68,7 @@ public class MyPageService {
 
         return orderedIds.stream()
                 .map(byId::get)
-                .filter(portfolio -> portfolio != null)
+                .filter(java.util.Objects::nonNull)
                 .toList();
     }
 
@@ -120,6 +120,6 @@ public class MyPageService {
         }
 
         return userRepository.findByEmail(email)
-                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalStateException("Authenticated user was not found."));
     }
 }
