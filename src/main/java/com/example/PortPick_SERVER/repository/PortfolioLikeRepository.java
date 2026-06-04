@@ -1,5 +1,6 @@
 package com.example.PortPick_SERVER.repository;
 
+import com.example.PortPick_SERVER.model.Portfolio;
 import com.example.PortPick_SERVER.model.PortfolioLike;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -35,6 +36,15 @@ public interface PortfolioLikeRepository extends JpaRepository<PortfolioLike, Lo
             @Param("userId") Long userId,
             @Param("portfolioIds") Collection<Long> portfolioIds
     );
+
+    @Query("""
+            select pl.portfolio
+            from PortfolioLike pl
+            join fetch pl.portfolio.user
+            where pl.user.id = :userId
+            order by pl.createdAt desc
+            """)
+    List<Portfolio> findLikedPortfoliosByUserId(@Param("userId") Long userId);
 
     interface PortfolioLikeCountProjection {
         Long getPortfolioId();

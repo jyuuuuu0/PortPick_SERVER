@@ -35,6 +35,15 @@ public interface CommentRepository extends JpaRepository<Comment, Long> {
             """)
     Optional<Comment> findWithDetailsById(@Param("commentId") Long commentId);
 
+    @Query("""
+            select c.portfolio.id
+            from Comment c
+            where c.user.id = :userId
+            group by c.portfolio.id
+            order by max(c.createdAt) desc
+            """)
+    List<Long> findCommentedPortfolioIdsByUserId(@Param("userId") Long userId);
+
     @Modifying(clearAutomatically = true)
     @Transactional
     @Query("delete from Comment c where c.portfolio.id = :portfolioId")
