@@ -99,7 +99,7 @@ public class PortfolioService {
     public PortfolioDetailResponse createPortfolio(String email, PortfolioCreateRequest request, MultipartFile file) {
         User user = getUser(email);
         if (!user.isSignupCompleted()) {
-            throw new IllegalStateException("회원가입을 먼저 완료해 주세요.");
+            throw new AccessDeniedException("회원가입을 먼저 완료해 주세요.");
         }
         if (request == null) {
             throw new IllegalArgumentException("포트폴리오 정보가 필요합니다.");
@@ -107,6 +107,8 @@ public class PortfolioService {
 
         String title = requireText(request.getTitle(), "포트폴리오 제목을 입력해 주세요.");
         String description = requireText(request.getDescription(), "포트폴리오 설명을 입력해 주세요.");
+        validateLength(title, 255, "포트폴리오 제목은 255자 이하로 입력해 주세요.");
+        validateLength(description, 5000, "포트폴리오 설명은 5000자 이하로 입력해 주세요.");
         String embedLink = normalizeOptionalText(request.getEmbedLink());
 
         validateAttachmentInput(embedLink, file);
@@ -140,6 +142,8 @@ public class PortfolioService {
 
         String title = requireText(request.getTitle(), "포트폴리오 제목을 입력해 주세요.");
         String description = requireText(request.getDescription(), "포트폴리오 설명을 입력해 주세요.");
+        validateLength(title, 255, "포트폴리오 제목은 255자 이하로 입력해 주세요.");
+        validateLength(description, 5000, "포트폴리오 설명은 5000자 이하로 입력해 주세요.");
 
         portfolio.updateText(title, description);
         return PortfolioDetailResponse.from(
@@ -405,6 +409,12 @@ public class PortfolioService {
             throw new IllegalArgumentException(message);
         }
         return value.trim();
+    }
+
+    private void validateLength(String value, int maxLength, String message) {
+        if (value != null && value.length() > maxLength) {
+            throw new IllegalArgumentException(message);
+        }
     }
 
     private String normalizeOptionalText(String value) {

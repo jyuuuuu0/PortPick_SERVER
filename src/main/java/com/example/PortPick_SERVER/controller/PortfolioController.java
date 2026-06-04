@@ -6,6 +6,7 @@ import com.example.PortPick_SERVER.dto.PortfolioLikeResponse;
 import com.example.PortPick_SERVER.dto.PortfolioSummaryResponse;
 import com.example.PortPick_SERVER.dto.PortfolioUpdateRequest;
 import com.example.PortPick_SERVER.service.PortfolioService;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -55,7 +56,7 @@ public class PortfolioController {
             @ModelAttribute PortfolioCreateRequest request,
             @RequestParam(value = "file", required = false) MultipartFile file
     ) {
-        return ResponseEntity.ok(portfolioService.createPortfolio(authentication.getName(), request, file));
+        return ResponseEntity.status(HttpStatus.CREATED).body(portfolioService.createPortfolio(authentication.getName(), request, file));
     }
 
     @PutMapping("/{portfolioId}")
