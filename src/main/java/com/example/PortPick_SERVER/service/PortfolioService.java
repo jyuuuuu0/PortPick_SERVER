@@ -11,6 +11,7 @@ import com.example.PortPick_SERVER.model.JobRole;
 import com.example.PortPick_SERVER.model.Portfolio;
 import com.example.PortPick_SERVER.model.PortfolioLike;
 import com.example.PortPick_SERVER.model.User;
+import com.example.PortPick_SERVER.repository.CommentRepository;
 import com.example.PortPick_SERVER.repository.PortfolioLikeRepository;
 import com.example.PortPick_SERVER.repository.PortfolioRepository;
 import com.example.PortPick_SERVER.repository.UserRepository;
@@ -50,6 +51,7 @@ public class PortfolioService {
 
     private final PortfolioRepository portfolioRepository;
     private final PortfolioLikeRepository portfolioLikeRepository;
+    private final CommentRepository commentRepository;
     private final UserRepository userRepository;
     private final Path portfolioUploadDirectory;
     private final String portfolioUploadUrlPrefix;
@@ -57,12 +59,14 @@ public class PortfolioService {
     public PortfolioService(
             PortfolioRepository portfolioRepository,
             PortfolioLikeRepository portfolioLikeRepository,
+            CommentRepository commentRepository,
             UserRepository userRepository,
             @Value("${app.portfolio.upload-dir:uploads/portfolios}") String portfolioUploadDir,
             @Value("${app.portfolio.upload-url-prefix:/uploads/portfolios}") String portfolioUploadUrlPrefix
     ) {
         this.portfolioRepository = portfolioRepository;
         this.portfolioLikeRepository = portfolioLikeRepository;
+        this.commentRepository = commentRepository;
         this.userRepository = userRepository;
         this.portfolioUploadDirectory = Path.of(portfolioUploadDir).toAbsolutePath().normalize();
         this.portfolioUploadUrlPrefix = portfolioUploadUrlPrefix;
@@ -161,6 +165,7 @@ public class PortfolioService {
         validateOwner(user, portfolio);
 
         String fileUrl = portfolio.getFileUrl();
+        commentRepository.deleteByPortfolioId(portfolioId);
         portfolioRepository.delete(portfolio);
         registerFileDeletionAfterCommit(fileUrl);
     }
