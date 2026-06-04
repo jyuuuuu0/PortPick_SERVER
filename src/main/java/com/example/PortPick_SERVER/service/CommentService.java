@@ -40,7 +40,7 @@ public class CommentService {
     }
 
     @Transactional(readOnly = true)
-    public List<CommentResponse> getComments(String email, Long portfolioId) {
+    public List<CommentResponse> getComments(Long portfolioId) {
         getPortfolio(portfolioId);
         return commentRepository.findAllByPortfolioIdWithDetails(portfolioId).stream()
                 .map(CommentResponse::from)

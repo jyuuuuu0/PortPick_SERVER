@@ -29,15 +29,9 @@ public class CommentController {
 
     @GetMapping("/api/v1/portfolios/{portfolioId}/comments")
     public ResponseEntity<List<CommentResponse>> getComments(
-            Authentication authentication,
             @PathVariable Long portfolioId
     ) {
-        return ResponseEntity.ok(
-                commentService.getComments(
-                        authentication != null ? authentication.getName() : null,
-                        portfolioId
-                )
-        );
+        return ResponseEntity.ok(commentService.getComments(portfolioId));
     }
 
     @PostMapping("/api/v1/portfolios/{portfolioId}/comments")
