@@ -3,9 +3,10 @@ package com.example.PortPick_SERVER.config;
 import com.example.PortPick_SERVER.filter.JwtAuthenticationFilter;
 import com.example.PortPick_SERVER.handler.OAuth2FailureHandler;
 import com.example.PortPick_SERVER.handler.OAuth2SuccessHandler;
+import com.example.PortPick_SERVER.jwt.JwtProvider;
 import com.example.PortPick_SERVER.service.CustomOAuth2UserService;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -18,13 +19,27 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 
 @Configuration
 @EnableWebSecurity
-@RequiredArgsConstructor
 public class SecurityConfig {
 
     private final CustomOAuth2UserService customOAuth2UserService;
     private final OAuth2SuccessHandler oAuth2SuccessHandler;
     private final OAuth2FailureHandler oAuth2FailureHandler;
-    private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final JwtProvider jwtProvider;
+    private final String authCookieName;
+
+    public SecurityConfig(
+            CustomOAuth2UserService customOAuth2UserService,
+            OAuth2SuccessHandler oAuth2SuccessHandler,
+            OAuth2FailureHandler oAuth2FailureHandler,
+            JwtProvider jwtProvider,
+            @Value("${app.auth.cookie-name:PORTPICK_ACCESS_TOKEN}") String authCookieName
+    ) {
+        this.customOAuth2UserService = customOAuth2UserService;
+        this.oAuth2SuccessHandler = oAuth2SuccessHandler;
+        this.oAuth2FailureHandler = oAuth2FailureHandler;
+        this.jwtProvider = jwtProvider;
+        this.authCookieName = authCookieName;
+    }
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -58,7 +73,7 @@ public class SecurityConfig {
                                     """.trim());
                         })
                 )
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(new JwtAuthenticationFilter(jwtProvider, authCookieName), UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
