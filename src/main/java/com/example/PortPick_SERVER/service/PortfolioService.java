@@ -14,6 +14,7 @@ import com.example.PortPick_SERVER.model.User;
 import com.example.PortPick_SERVER.repository.CommentRepository;
 import com.example.PortPick_SERVER.repository.PortfolioLikeRepository;
 import com.example.PortPick_SERVER.repository.PortfolioRepository;
+import com.example.PortPick_SERVER.repository.ReplyRepository;
 import com.example.PortPick_SERVER.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -52,6 +53,7 @@ public class PortfolioService {
     private final PortfolioRepository portfolioRepository;
     private final PortfolioLikeRepository portfolioLikeRepository;
     private final CommentRepository commentRepository;
+    private final ReplyRepository replyRepository;
     private final UserRepository userRepository;
     private final Path portfolioUploadDirectory;
     private final String portfolioUploadUrlPrefix;
@@ -60,6 +62,7 @@ public class PortfolioService {
             PortfolioRepository portfolioRepository,
             PortfolioLikeRepository portfolioLikeRepository,
             CommentRepository commentRepository,
+            ReplyRepository replyRepository,
             UserRepository userRepository,
             @Value("${app.portfolio.upload-dir:uploads/portfolios}") String portfolioUploadDir,
             @Value("${app.portfolio.upload-url-prefix:/uploads/portfolios}") String portfolioUploadUrlPrefix
@@ -67,6 +70,7 @@ public class PortfolioService {
         this.portfolioRepository = portfolioRepository;
         this.portfolioLikeRepository = portfolioLikeRepository;
         this.commentRepository = commentRepository;
+        this.replyRepository = replyRepository;
         this.userRepository = userRepository;
         this.portfolioUploadDirectory = Path.of(portfolioUploadDir).toAbsolutePath().normalize();
         this.portfolioUploadUrlPrefix = portfolioUploadUrlPrefix;
@@ -165,6 +169,7 @@ public class PortfolioService {
         validateOwner(user, portfolio);
 
         String fileUrl = portfolio.getFileUrl();
+        replyRepository.deleteByPortfolioId(portfolioId);
         commentRepository.deleteByPortfolioId(portfolioId);
         portfolioRepository.delete(portfolio);
         registerFileDeletionAfterCommit(fileUrl);
