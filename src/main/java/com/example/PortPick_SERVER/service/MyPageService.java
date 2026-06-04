@@ -1,6 +1,5 @@
 package com.example.PortPick_SERVER.service;
 
-import com.example.PortPick_SERVER.dto.MyPageResponse;
 import com.example.PortPick_SERVER.dto.PortfolioSummaryResponse;
 import com.example.PortPick_SERVER.model.Portfolio;
 import com.example.PortPick_SERVER.model.User;
@@ -41,21 +40,24 @@ public class MyPageService {
     }
 
     @Transactional(readOnly = true)
-    public MyPageResponse getMyPage(String email) {
+    public List<PortfolioSummaryResponse> getMyPortfolios(String email) {
         User user = getUser(email);
-
-        List<Portfolio> myPortfolios = portfolioRepository.findAllByUserId(user.getId());
-        List<Portfolio> likedPortfolios = portfolioLikeRepository.findLikedPortfoliosByUserId(user.getId());
-        List<Portfolio> commentedPortfolios = getCommentedPortfolios(user.getId());
-
-        return MyPageResponse.of(
-                toSummaries(myPortfolios, user.getId()),
-                toSummaries(likedPortfolios, user.getId()),
-                toSummaries(commentedPortfolios, user.getId())
-        );
+        return toSummaries(portfolioRepository.findAllByUserId(user.getId()), user.getId());
     }
 
-    private List<Portfolio> getCommentedPortfolios(Long userId) {
+    @Transactional(readOnly = true)
+    public List<PortfolioSummaryResponse> getLikedPortfolios(String email) {
+        User user = getUser(email);
+        return toSummaries(portfolioLikeRepository.findLikedPortfoliosByUserId(user.getId()), user.getId());
+    }
+
+    @Transactional(readOnly = true)
+    public List<PortfolioSummaryResponse> getCommentedPortfolios(String email) {
+        User user = getUser(email);
+        return toSummaries(fetchCommentedPortfolios(user.getId()), user.getId());
+    }
+
+    private List<Portfolio> fetchCommentedPortfolios(Long userId) {
         List<Long> orderedIds = commentRepository.findCommentedPortfolioIdsByUserId(userId);
         if (orderedIds.isEmpty()) {
             return List.of();
