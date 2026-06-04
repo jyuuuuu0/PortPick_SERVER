@@ -10,6 +10,8 @@ import com.example.PortPick_SERVER.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -70,25 +72,52 @@ public class ProfileService {
     private ProfileResponse saveProfile(User user, ProfileUpsertRequest request, MultipartFile profileImage) {
         ProfileDraft profileDraft = buildProfileDraft(request, profileImage, user);
 
-        try {
-            user.completeSignup(
-                    profileDraft.name(),
-                    profileDraft.organizationName(),
-                    profileDraft.noOrganization(),
-                    profileDraft.jobRole(),
-                    profileDraft.careerType(),
-                    profileDraft.careerRange(),
-                    profileDraft.profileImageUrl(),
-                    profileDraft.customProfileImage()
-            );
+        registerRollbackImageCleanup(profileDraft.newCustomImageUrlToDeleteOnFailure());
 
-            User savedUser = userRepository.save(user);
-            deleteProfileImageIfNeeded(profileDraft.oldCustomImageUrlToDelete());
-            return ProfileResponse.from(savedUser);
-        } catch (RuntimeException exception) {
-            deleteProfileImageIfNeeded(profileDraft.newCustomImageUrlToDeleteOnFailure());
-            throw exception;
+        user.completeSignup(
+                profileDraft.name(),
+                profileDraft.organizationName(),
+                profileDraft.noOrganization(),
+                profileDraft.jobRole(),
+                profileDraft.careerType(),
+                profileDraft.careerRange(),
+                profileDraft.profileImageUrl(),
+                profileDraft.customProfileImage()
+        );
+
+        User savedUser = userRepository.save(user);
+        registerImageDeletionAfterCommit(profileDraft.oldCustomImageUrlToDelete());
+        return ProfileResponse.from(savedUser);
+    }
+
+    private void registerRollbackImageCleanup(String newImageUrl) {
+        if (!StringUtils.hasText(newImageUrl) || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            return;
         }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == STATUS_ROLLED_BACK) {
+                    deleteProfileImageIfNeeded(newImageUrl);
+                }
+            }
+        });
+    }
+
+    private void registerImageDeletionAfterCommit(String oldImageUrl) {
+        if (!StringUtils.hasText(oldImageUrl)) {
+            return;
+        }
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            deleteProfileImageIfNeeded(oldImageUrl);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                deleteProfileImageIfNeeded(oldImageUrl);
+            }
+        });
     }
 
     private User getUser(String email) {
