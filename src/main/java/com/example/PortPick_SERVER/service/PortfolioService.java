@@ -15,6 +15,7 @@ import com.example.PortPick_SERVER.repository.PortfolioLikeRepository;
 import com.example.PortPick_SERVER.repository.PortfolioRepository;
 import com.example.PortPick_SERVER.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -181,7 +182,11 @@ public class PortfolioService {
         Portfolio portfolio = getPortfolio(portfolioId);
 
         if (!portfolioLikeRepository.existsByPortfolioIdAndUserId(portfolioId, user.getId())) {
-            portfolioLikeRepository.save(new PortfolioLike(portfolio, user));
+            try {
+                portfolioLikeRepository.saveAndFlush(new PortfolioLike(portfolio, user));
+            } catch (DataIntegrityViolationException ignored) {
+                // 동시 요청으로 인한 중복 INSERT — 이미 좋아요 상태이므로 정상 처리
+            }
         }
 
         return buildLikeResponse(portfolioId, true);
