@@ -57,7 +57,6 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/me", "/api/v1/auth/logout").authenticated()
                         .requestMatchers("/api/v1/profile/**").authenticated()
                         .requestMatchers("/api/v1/mypage/**").authenticated()
-                        .requestMatchers("/api/v1/portfolios/*/comments").authenticated()
                         .requestMatchers("/api/v1/comments/**").authenticated()
                         .requestMatchers("/api/v1/replies/**").authenticated()
                         .requestMatchers("/api/v1/portfolios/**").authenticated()
