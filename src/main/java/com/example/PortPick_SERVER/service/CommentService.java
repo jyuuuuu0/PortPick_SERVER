@@ -22,6 +22,9 @@ import java.util.List;
 @Service
 public class CommentService {
 
+    private static final double MIN_PERCENT = 0.0;
+    private static final double MAX_PERCENT = 100.0;
+
     private final CommentRepository commentRepository;
     private final ReplyRepository replyRepository;
     private final PortfolioRepository portfolioRepository;
@@ -152,10 +155,10 @@ public class CommentService {
         if (xPercent == null || yPercent == null) {
             throw new IllegalArgumentException("코멘트 좌표(xPercent, yPercent)가 필요합니다.");
         }
-        if (xPercent < 0.0 || xPercent > 100.0) {
+        if (xPercent < MIN_PERCENT || xPercent > MAX_PERCENT) {
             throw new IllegalArgumentException("xPercent는 0.0 이상 100.0 이하여야 합니다.");
         }
-        if (yPercent < 0.0 || yPercent > 100.0) {
+        if (yPercent < MIN_PERCENT || yPercent > MAX_PERCENT) {
             throw new IllegalArgumentException("yPercent는 0.0 이상 100.0 이하여야 합니다.");
         }
     }
