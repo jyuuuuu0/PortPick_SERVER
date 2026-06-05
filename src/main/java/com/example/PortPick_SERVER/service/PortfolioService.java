@@ -427,7 +427,7 @@ public class PortfolioService {
     }
 
     private void validateLength(String value, int maxLength, String message) {
-        if (value != null && value.length() > maxLength) {
+        if (value.length() > maxLength) {
             throw new IllegalArgumentException(message);
         }
     }
