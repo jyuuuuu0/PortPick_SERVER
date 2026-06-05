@@ -10,18 +10,11 @@ import com.example.PortPick_SERVER.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.Set;
-import java.util.UUID;
 
 @Service
 public class ProfileService {
@@ -29,17 +22,20 @@ public class ProfileService {
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of("jpg", "jpeg", "png", "gif", "webp");
 
     private final UserRepository userRepository;
+    private final FileStorageService fileStorageService;
     private final Path profileUploadDirectory;
     private final String profileUploadUrlPrefix;
     private final String defaultProfileImageUrl;
 
     public ProfileService(
             UserRepository userRepository,
+            FileStorageService fileStorageService,
             @Value("${app.profile.upload-dir:uploads/profiles}") String profileUploadDir,
             @Value("${app.profile.upload-url-prefix:/uploads/profiles}") String profileUploadUrlPrefix,
             @Value("${app.profile.default-image-url:/images/default-profile.svg}") String defaultProfileImageUrl
     ) {
         this.userRepository = userRepository;
+        this.fileStorageService = fileStorageService;
         this.profileUploadDirectory = Path.of(profileUploadDir).toAbsolutePath().normalize();
         this.profileUploadUrlPrefix = profileUploadUrlPrefix;
         this.defaultProfileImageUrl = defaultProfileImageUrl;
@@ -72,7 +68,9 @@ public class ProfileService {
     private ProfileResponse saveProfile(User user, ProfileUpsertRequest request, MultipartFile profileImage) {
         ProfileDraft profileDraft = buildProfileDraft(request, profileImage, user);
 
-        registerRollbackImageCleanup(profileDraft.newCustomImageUrlToDeleteOnFailure());
+        fileStorageService.registerRollbackCleanup(
+                profileDraft.newCustomImageUrlToDeleteOnFailure(),
+                profileUploadDirectory, profileUploadUrlPrefix);
 
         user.completeSignup(
                 profileDraft.name(),
@@ -86,38 +84,10 @@ public class ProfileService {
         );
 
         User savedUser = userRepository.save(user);
-        registerImageDeletionAfterCommit(profileDraft.oldCustomImageUrlToDelete());
+        fileStorageService.registerDeletionAfterCommit(
+                profileDraft.oldCustomImageUrlToDelete(),
+                profileUploadDirectory, profileUploadUrlPrefix);
         return ProfileResponse.from(savedUser);
-    }
-
-    private void registerRollbackImageCleanup(String newImageUrl) {
-        if (!StringUtils.hasText(newImageUrl) || !TransactionSynchronizationManager.isSynchronizationActive()) {
-            return;
-        }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCompletion(int status) {
-                if (status == STATUS_ROLLED_BACK) {
-                    deleteProfileImageIfNeeded(newImageUrl);
-                }
-            }
-        });
-    }
-
-    private void registerImageDeletionAfterCommit(String oldImageUrl) {
-        if (!StringUtils.hasText(oldImageUrl)) {
-            return;
-        }
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            deleteProfileImageIfNeeded(oldImageUrl);
-            return;
-        }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                deleteProfileImageIfNeeded(oldImageUrl);
-            }
-        });
     }
 
     private User getUser(String email) {
@@ -169,7 +139,9 @@ public class ProfileService {
 
     private ImageDraft resolveProfileImage(MultipartFile profileImage, boolean deleteProfileImage, User user) {
         if (profileImage != null && !profileImage.isEmpty()) {
-            String uploadedUrl = storeProfileImage(profileImage);
+            String uploadedUrl = fileStorageService.store(
+                    profileImage, profileUploadDirectory, profileUploadUrlPrefix,
+                    ALLOWED_EXTENSIONS, "프로필 이미지를 저장하지 못했습니다.");
             String oldUrl = user.isCustomProfileImage() ? user.getProfileImageUrl() : null;
             return new ImageDraft(uploadedUrl, true, oldUrl, uploadedUrl);
         }
@@ -184,68 +156,6 @@ public class ProfileService {
         }
 
         return new ImageDraft(defaultProfileImageUrl, false, null, null);
-    }
-
-    private String storeProfileImage(MultipartFile profileImage) {
-        String originalFilename = profileImage.getOriginalFilename();
-        String extension = extractExtension(originalFilename);
-
-        try {
-            Files.createDirectories(profileUploadDirectory);
-            String savedFilename = UUID.randomUUID() + "." + extension;
-            Path target = profileUploadDirectory.resolve(savedFilename).normalize();
-
-            try (InputStream inputStream = profileImage.getInputStream()) {
-                Files.copy(inputStream, target, StandardCopyOption.REPLACE_EXISTING);
-            }
-
-            return profileUploadUrlPrefix + "/" + savedFilename;
-        } catch (IOException exception) {
-            throw new IllegalStateException("프로필 이미지를 저장하지 못했습니다.");
-        }
-    }
-
-    private void deleteProfileImageIfNeeded(String imageUrlToDelete) {
-        if (!StringUtils.hasText(imageUrlToDelete)) {
-            return;
-        }
-
-        deleteStoredFile(imageUrlToDelete);
-    }
-
-    private void deleteStoredFile(String imageUrl) {
-        if (!imageUrl.startsWith(profileUploadUrlPrefix + "/")) {
-            return;
-        }
-
-        String filename = imageUrl.substring((profileUploadUrlPrefix + "/").length());
-        if (!StringUtils.hasText(filename)) {
-            return;
-        }
-
-        Path target = profileUploadDirectory.resolve(filename).normalize();
-        if (!target.startsWith(profileUploadDirectory)) {
-            return;
-        }
-
-        try {
-            Files.deleteIfExists(target);
-        } catch (IOException ignored) {
-            // Ignore cleanup failures so profile updates are not rolled back by stale files.
-        }
-    }
-
-    private String extractExtension(String filename) {
-        if (!StringUtils.hasText(filename) || !filename.contains(".")) {
-            throw new IllegalArgumentException("이미지 파일 형식이 올바르지 않습니다.");
-        }
-
-        String extension = filename.substring(filename.lastIndexOf('.') + 1).toLowerCase();
-        if (!ALLOWED_EXTENSIONS.contains(extension)) {
-            throw new IllegalArgumentException("프로필 이미지는 jpg, jpeg, png, gif, webp 파일만 업로드할 수 있습니다.");
-        }
-
-        return extension;
     }
 
     private String requireText(String value, String message) {
