@@ -4,26 +4,20 @@ import com.example.PortPick_SERVER.model.Portfolio;
 
 import java.time.LocalDateTime;
 
-public record PortfolioDetailResponse(
+public record PortfolioSummaryResponse(
         Long id,
         String title,
         String description,
-        String embedLink,
-        String fileUrl,
-        String originalFileName,
         LocalDateTime createdAt,
         PortfolioAuthorResponse author,
         long likeCount,
         boolean liked
 ) {
-    public static PortfolioDetailResponse from(Portfolio portfolio, long likeCount, boolean liked) {
-        return new PortfolioDetailResponse(
+    public static PortfolioSummaryResponse from(Portfolio portfolio, long likeCount, boolean liked) {
+        return new PortfolioSummaryResponse(
                 portfolio.getId(),
                 portfolio.getTitle(),
                 portfolio.getDescription(),
-                portfolio.getEmbedLink(),
-                portfolio.getFileUrl(),
-                portfolio.getOriginalFileName(),
                 portfolio.getCreatedAt(),
                 PortfolioAuthorResponse.from(portfolio.getUser()),
                 likeCount,

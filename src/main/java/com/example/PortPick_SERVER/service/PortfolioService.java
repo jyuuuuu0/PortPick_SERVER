@@ -2,30 +2,37 @@ package com.example.PortPick_SERVER.service;
 
 import com.example.PortPick_SERVER.dto.PortfolioCreateRequest;
 import com.example.PortPick_SERVER.dto.PortfolioDetailResponse;
+import com.example.PortPick_SERVER.dto.PortfolioLikeResponse;
+import com.example.PortPick_SERVER.dto.PortfolioSummaryResponse;
 import com.example.PortPick_SERVER.dto.PortfolioUpdateRequest;
+import com.example.PortPick_SERVER.model.CareerRange;
+import com.example.PortPick_SERVER.model.CareerType;
+import com.example.PortPick_SERVER.model.JobRole;
 import com.example.PortPick_SERVER.model.Portfolio;
+import com.example.PortPick_SERVER.model.PortfolioLike;
 import com.example.PortPick_SERVER.model.User;
+import com.example.PortPick_SERVER.repository.CommentRepository;
+import com.example.PortPick_SERVER.repository.PortfolioLikeRepository;
 import com.example.PortPick_SERVER.repository.PortfolioRepository;
+import com.example.PortPick_SERVER.repository.ReplyRepository;
 import com.example.PortPick_SERVER.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.UncheckedIOException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class PortfolioService {
@@ -36,20 +43,58 @@ public class PortfolioService {
     );
 
     private final PortfolioRepository portfolioRepository;
+    private final PortfolioLikeRepository portfolioLikeRepository;
+    private final CommentRepository commentRepository;
+    private final ReplyRepository replyRepository;
     private final UserRepository userRepository;
+    private final FileStorageService fileStorageService;
     private final Path portfolioUploadDirectory;
     private final String portfolioUploadUrlPrefix;
 
     public PortfolioService(
             PortfolioRepository portfolioRepository,
+            PortfolioLikeRepository portfolioLikeRepository,
+            CommentRepository commentRepository,
+            ReplyRepository replyRepository,
             UserRepository userRepository,
+            FileStorageService fileStorageService,
             @Value("${app.portfolio.upload-dir:uploads/portfolios}") String portfolioUploadDir,
             @Value("${app.portfolio.upload-url-prefix:/uploads/portfolios}") String portfolioUploadUrlPrefix
     ) {
         this.portfolioRepository = portfolioRepository;
+        this.portfolioLikeRepository = portfolioLikeRepository;
+        this.commentRepository = commentRepository;
+        this.replyRepository = replyRepository;
         this.userRepository = userRepository;
+        this.fileStorageService = fileStorageService;
         this.portfolioUploadDirectory = Path.of(portfolioUploadDir).toAbsolutePath().normalize();
         this.portfolioUploadUrlPrefix = portfolioUploadUrlPrefix;
+    }
+
+    @Transactional(readOnly = true)
+    public List<PortfolioSummaryResponse> getPortfolios(
+            String email,
+            String jobRoleValue,
+            String careerTypeValue,
+            String careerRangeValue
+    ) {
+        JobRole jobRole = parseJobRole(jobRoleValue);
+        CareerType careerType = parseCareerType(careerTypeValue);
+        CareerRange careerRange = parseCareerRange(careerRangeValue);
+
+        List<Portfolio> portfolios = portfolioRepository.findAllByFilters(jobRole, careerType, careerRange);
+        List<Long> portfolioIds = portfolios.stream().map(Portfolio::getId).toList();
+
+        Map<Long, Long> likeCounts = getLikeCounts(portfolioIds);
+        Set<Long> likedPortfolioIds = getLikedPortfolioIds(email, portfolioIds);
+
+        return portfolios.stream()
+                .map(portfolio -> PortfolioSummaryResponse.from(
+                        portfolio,
+                        likeCounts.getOrDefault(portfolio.getId(), 0L),
+                        likedPortfolioIds.contains(portfolio.getId())
+                ))
+                .toList();
     }
 
     @Transactional
@@ -71,19 +116,17 @@ public class PortfolioService {
         validateAttachmentInput(embedLink, file);
         validateEmbedLink(embedLink);
 
-        StoredFile storedFile = storePortfolioFile(file);
-        registerRollbackFileCleanup(storedFile);
+        String fileUrl = null;
+        String originalFileName = null;
+        if (file != null && !file.isEmpty()) {
+            originalFileName = requireText(file.getOriginalFilename(), "업로드 파일명이 올바르지 않습니다.");
+            fileUrl = fileStorageService.store(file, portfolioUploadDirectory, portfolioUploadUrlPrefix,
+                    ALLOWED_EXTENSIONS, "포트폴리오 파일을 저장하지 못했습니다.");
+            fileStorageService.registerRollbackCleanup(fileUrl, portfolioUploadDirectory, portfolioUploadUrlPrefix);
+        }
 
-        Portfolio portfolio = new Portfolio(
-                user,
-                title,
-                description,
-                embedLink,
-                storedFile != null ? storedFile.fileUrl() : null,
-                storedFile != null ? storedFile.originalFileName() : null
-        );
-
-        return PortfolioDetailResponse.from(portfolioRepository.save(portfolio));
+        Portfolio portfolio = new Portfolio(user, title, description, embedLink, fileUrl, originalFileName);
+        return PortfolioDetailResponse.from(portfolioRepository.save(portfolio), 0L, false);
     }
 
     @Transactional
@@ -102,7 +145,11 @@ public class PortfolioService {
         validateLength(description, 5000, "포트폴리오 설명은 5000자 이하로 입력해 주세요.");
 
         portfolio.updateText(title, description);
-        return PortfolioDetailResponse.from(portfolio);
+        return PortfolioDetailResponse.from(
+                portfolio,
+                portfolioLikeRepository.countByPortfolioId(portfolioId),
+                portfolioLikeRepository.existsByPortfolioIdAndUserId(portfolioId, user.getId())
+        );
     }
 
     @Transactional
@@ -112,13 +159,70 @@ public class PortfolioService {
         validateOwner(user, portfolio);
 
         String fileUrl = portfolio.getFileUrl();
+        replyRepository.deleteByPortfolioId(portfolioId);
+        commentRepository.deleteByPortfolioId(portfolioId);
         portfolioRepository.delete(portfolio);
-        registerFileDeletionAfterCommit(fileUrl);
+        fileStorageService.registerDeletionAfterCommit(fileUrl, portfolioUploadDirectory, portfolioUploadUrlPrefix);
     }
 
     @Transactional(readOnly = true)
-    public PortfolioDetailResponse getPortfolioDetail(Long portfolioId) {
-        return PortfolioDetailResponse.from(getPortfolio(portfolioId));
+    public PortfolioDetailResponse getPortfolioDetail(String email, Long portfolioId) {
+        Portfolio portfolio = getPortfolio(portfolioId);
+        User currentUser = findUser(email);
+        long likeCount = portfolioLikeRepository.countByPortfolioId(portfolioId);
+        boolean liked = currentUser != null
+                && portfolioLikeRepository.existsByPortfolioIdAndUserId(portfolioId, currentUser.getId());
+
+        return PortfolioDetailResponse.from(portfolio, likeCount, liked);
+    }
+
+    @Transactional
+    public PortfolioLikeResponse likePortfolio(String email, Long portfolioId) {
+        User user = getUser(email);
+        Portfolio portfolio = getPortfolio(portfolioId);
+
+        if (!portfolioLikeRepository.existsByPortfolioIdAndUserId(portfolioId, user.getId())) {
+            try {
+                portfolioLikeRepository.saveAndFlush(new PortfolioLike(portfolio, user));
+            } catch (DataIntegrityViolationException ignored) {
+                // 동시 요청으로 인한 중복 INSERT — 이미 좋아요 상태이므로 정상 처리
+            }
+        }
+
+        return buildLikeResponse(portfolioId, true);
+    }
+
+    @Transactional
+    public PortfolioLikeResponse unlikePortfolio(String email, Long portfolioId) {
+        User user = getUser(email);
+        getPortfolio(portfolioId);
+
+        portfolioLikeRepository.findByPortfolioIdAndUserId(portfolioId, user.getId())
+                .ifPresent(portfolioLikeRepository::delete);
+
+        return buildLikeResponse(portfolioId, false);
+    }
+
+    @Transactional(readOnly = true)
+    public PortfolioLikeResponse getPortfolioLikeStatus(String email, Long portfolioId) {
+        getPortfolio(portfolioId);
+        User currentUser = findUser(email);
+        boolean liked = currentUser != null
+                && portfolioLikeRepository.existsByPortfolioIdAndUserId(portfolioId, currentUser.getId());
+
+        return new PortfolioLikeResponse(
+                portfolioId,
+                portfolioLikeRepository.countByPortfolioId(portfolioId),
+                liked
+        );
+    }
+
+    private PortfolioLikeResponse buildLikeResponse(Long portfolioId, boolean liked) {
+        return new PortfolioLikeResponse(
+                portfolioId,
+                portfolioLikeRepository.countByPortfolioId(portfolioId),
+                liked
+        );
     }
 
     private User getUser(String email) {
@@ -130,8 +234,15 @@ public class PortfolioService {
                 .orElseThrow(() -> new IllegalStateException("Authenticated user was not found."));
     }
 
+    private User findUser(String email) {
+        if (!StringUtils.hasText(email)) {
+            return null;
+        }
+        return userRepository.findByEmail(email).orElse(null);
+    }
+
     private Portfolio getPortfolio(Long portfolioId) {
-        return portfolioRepository.findById(portfolioId)
+        return portfolioRepository.findWithUserById(portfolioId)
                 .orElseThrow(() -> new IllegalArgumentException("포트폴리오를 찾을 수 없습니다."));
     }
 
@@ -165,99 +276,42 @@ public class PortfolioService {
         }
     }
 
-    private StoredFile storePortfolioFile(MultipartFile file) {
-        if (file == null || file.isEmpty()) {
-            return null;
+    private Map<Long, Long> getLikeCounts(Collection<Long> portfolioIds) {
+        if (portfolioIds.isEmpty()) {
+            return Collections.emptyMap();
         }
 
-        String originalFilename = requireText(file.getOriginalFilename(), "업로드 파일명이 올바르지 않습니다.");
-        String extension = extractExtension(originalFilename);
-
-        try {
-            Files.createDirectories(portfolioUploadDirectory);
-            String savedFilename = UUID.randomUUID() + "." + extension;
-            Path target = portfolioUploadDirectory.resolve(savedFilename).normalize();
-
-            try (InputStream inputStream = file.getInputStream()) {
-                Files.copy(inputStream, target, StandardCopyOption.REPLACE_EXISTING);
-            }
-
-            return new StoredFile(portfolioUploadUrlPrefix + "/" + savedFilename, originalFilename);
-        } catch (IOException exception) {
-            throw new UncheckedIOException("포트폴리오 파일을 저장하지 못했습니다.", exception);
-        }
+        return portfolioLikeRepository.countByPortfolioIds(portfolioIds).stream()
+                .collect(Collectors.toMap(
+                        PortfolioLikeRepository.PortfolioLikeCountProjection::getPortfolioId,
+                        PortfolioLikeRepository.PortfolioLikeCountProjection::getLikeCount
+                ));
     }
 
-    private void registerRollbackFileCleanup(StoredFile storedFile) {
-        if (storedFile == null || !TransactionSynchronizationManager.isSynchronizationActive()) {
-            return;
+    private Set<Long> getLikedPortfolioIds(String email, Collection<Long> portfolioIds) {
+        if (!StringUtils.hasText(email) || portfolioIds.isEmpty()) {
+            return Collections.emptySet();
         }
 
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCompletion(int status) {
-                if (status == STATUS_ROLLED_BACK) {
-                    deleteStoredFileIfNeeded(storedFile.fileUrl());
-                }
-            }
-        });
+        User user = findUser(email);
+        if (user == null) {
+            return Collections.emptySet();
+        }
+
+        return portfolioLikeRepository.findLikedPortfolioIdsByUserIdAndPortfolioIds(user.getId(), portfolioIds).stream()
+                .collect(Collectors.toSet());
     }
 
-    private void registerFileDeletionAfterCommit(String fileUrl) {
-        if (!StringUtils.hasText(fileUrl)) {
-            return;
-        }
-
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            deleteStoredFileIfNeeded(fileUrl);
-            return;
-        }
-
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                deleteStoredFileIfNeeded(fileUrl);
-            }
-        });
+    private JobRole parseJobRole(String value) {
+        return StringUtils.hasText(value) ? JobRole.from(value) : null;
     }
 
-    private void deleteStoredFileIfNeeded(String fileUrl) {
-        if (!StringUtils.hasText(fileUrl)) {
-            return;
-        }
-
-        if (!fileUrl.startsWith(portfolioUploadUrlPrefix + "/")) {
-            return;
-        }
-
-        String filename = fileUrl.substring((portfolioUploadUrlPrefix + "/").length());
-        if (!StringUtils.hasText(filename)) {
-            return;
-        }
-
-        Path target = portfolioUploadDirectory.resolve(filename).normalize();
-        if (!target.startsWith(portfolioUploadDirectory)) {
-            return;
-        }
-
-        try {
-            Files.deleteIfExists(target);
-        } catch (IOException ignored) {
-            // Ignore cleanup failures after delete.
-        }
+    private CareerType parseCareerType(String value) {
+        return StringUtils.hasText(value) ? CareerType.from(value) : null;
     }
 
-    private String extractExtension(String filename) {
-        if (!filename.contains(".")) {
-            throw new IllegalArgumentException("업로드 파일 형식이 올바르지 않습니다.");
-        }
-
-        String extension = filename.substring(filename.lastIndexOf('.') + 1).toLowerCase();
-        if (!ALLOWED_EXTENSIONS.contains(extension)) {
-            throw new IllegalArgumentException("지원하지 않는 포트폴리오 파일 형식입니다.");
-        }
-
-        return extension;
+    private CareerRange parseCareerRange(String value) {
+        return StringUtils.hasText(value) ? CareerRange.from(value) : null;
     }
 
     private String requireText(String value, String message) {
@@ -268,18 +322,12 @@ public class PortfolioService {
     }
 
     private void validateLength(String value, int maxLength, String message) {
-        if (value != null && value.length() > maxLength) {
+        if (value.length() > maxLength) {
             throw new IllegalArgumentException(message);
         }
     }
 
     private String normalizeOptionalText(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
-    }
-
-    private record StoredFile(
-            String fileUrl,
-            String originalFileName
-    ) {
     }
 }

@@ -7,8 +7,7 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-public class PortfolioUpdateRequest {
+public class ReplyCreateRequest {
 
-    private String title;
-    private String description;
+    private String content;
 }

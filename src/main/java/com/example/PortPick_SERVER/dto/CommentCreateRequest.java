@@ -7,8 +7,9 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-public class PortfolioUpdateRequest {
+public class CommentCreateRequest {
 
-    private String title;
-    private String description;
+    private String content;
+    private Double xPercent;
+    private Double yPercent;
 }
