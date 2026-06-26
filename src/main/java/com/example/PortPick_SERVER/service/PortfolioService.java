@@ -21,25 +21,17 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.UncheckedIOException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -55,6 +47,7 @@ public class PortfolioService {
     private final CommentRepository commentRepository;
     private final ReplyRepository replyRepository;
     private final UserRepository userRepository;
+    private final FileStorageService fileStorageService;
     private final Path portfolioUploadDirectory;
     private final String portfolioUploadUrlPrefix;
 
@@ -64,6 +57,7 @@ public class PortfolioService {
             CommentRepository commentRepository,
             ReplyRepository replyRepository,
             UserRepository userRepository,
+            FileStorageService fileStorageService,
             @Value("${app.portfolio.upload-dir:uploads/portfolios}") String portfolioUploadDir,
             @Value("${app.portfolio.upload-url-prefix:/uploads/portfolios}") String portfolioUploadUrlPrefix
     ) {
@@ -72,6 +66,7 @@ public class PortfolioService {
         this.commentRepository = commentRepository;
         this.replyRepository = replyRepository;
         this.userRepository = userRepository;
+        this.fileStorageService = fileStorageService;
         this.portfolioUploadDirectory = Path.of(portfolioUploadDir).toAbsolutePath().normalize();
         this.portfolioUploadUrlPrefix = portfolioUploadUrlPrefix;
     }
@@ -88,9 +83,7 @@ public class PortfolioService {
         CareerRange careerRange = parseCareerRange(careerRangeValue);
 
         List<Portfolio> portfolios = portfolioRepository.findAllByFilters(jobRole, careerType, careerRange);
-        List<Long> portfolioIds = portfolios.stream()
-                .map(Portfolio::getId)
-                .toList();
+        List<Long> portfolioIds = portfolios.stream().map(Portfolio::getId).toList();
 
         Map<Long, Long> likeCounts = getLikeCounts(portfolioIds);
         Set<Long> likedPortfolioIds = getLikedPortfolioIds(email, portfolioIds);
@@ -123,20 +116,17 @@ public class PortfolioService {
         validateAttachmentInput(embedLink, file);
         validateEmbedLink(embedLink);
 
-        StoredFile storedFile = storePortfolioFile(file);
-        registerRollbackFileCleanup(storedFile);
+        String fileUrl = null;
+        String originalFileName = null;
+        if (file != null && !file.isEmpty()) {
+            originalFileName = requireText(file.getOriginalFilename(), "업로드 파일명이 올바르지 않습니다.");
+            fileUrl = fileStorageService.store(file, portfolioUploadDirectory, portfolioUploadUrlPrefix,
+                    ALLOWED_EXTENSIONS, "포트폴리오 파일을 저장하지 못했습니다.");
+            fileStorageService.registerRollbackCleanup(fileUrl, portfolioUploadDirectory, portfolioUploadUrlPrefix);
+        }
 
-        Portfolio portfolio = new Portfolio(
-                user,
-                title,
-                description,
-                embedLink,
-                storedFile != null ? storedFile.fileUrl() : null,
-                storedFile != null ? storedFile.originalFileName() : null
-        );
-
-        Portfolio savedPortfolio = portfolioRepository.save(portfolio);
-        return PortfolioDetailResponse.from(savedPortfolio, 0L, false);
+        Portfolio portfolio = new Portfolio(user, title, description, embedLink, fileUrl, originalFileName);
+        return PortfolioDetailResponse.from(portfolioRepository.save(portfolio), 0L, false);
     }
 
     @Transactional
@@ -172,7 +162,7 @@ public class PortfolioService {
         replyRepository.deleteByPortfolioId(portfolioId);
         commentRepository.deleteByPortfolioId(portfolioId);
         portfolioRepository.delete(portfolio);
-        registerFileDeletionAfterCommit(fileUrl);
+        fileStorageService.registerDeletionAfterCommit(fileUrl, portfolioUploadDirectory, portfolioUploadUrlPrefix);
     }
 
     @Transactional(readOnly = true)
@@ -286,88 +276,6 @@ public class PortfolioService {
         }
     }
 
-    private StoredFile storePortfolioFile(MultipartFile file) {
-        if (file == null || file.isEmpty()) {
-            return null;
-        }
-
-        String originalFilename = requireText(file.getOriginalFilename(), "업로드 파일명이 올바르지 않습니다.");
-        String extension = extractExtension(originalFilename);
-
-        try {
-            Files.createDirectories(portfolioUploadDirectory);
-            String savedFilename = UUID.randomUUID() + "." + extension;
-            Path target = portfolioUploadDirectory.resolve(savedFilename).normalize();
-
-            try (InputStream inputStream = file.getInputStream()) {
-                Files.copy(inputStream, target, StandardCopyOption.REPLACE_EXISTING);
-            }
-
-            return new StoredFile(portfolioUploadUrlPrefix + "/" + savedFilename, originalFilename);
-        } catch (IOException exception) {
-            throw new UncheckedIOException("포트폴리오 파일을 저장하지 못했습니다.", exception);
-        }
-    }
-
-    private void registerRollbackFileCleanup(StoredFile storedFile) {
-        if (storedFile == null || !TransactionSynchronizationManager.isSynchronizationActive()) {
-            return;
-        }
-
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCompletion(int status) {
-                if (status == STATUS_ROLLED_BACK) {
-                    deleteStoredFileIfNeeded(storedFile.fileUrl());
-                }
-            }
-        });
-    }
-
-    private void registerFileDeletionAfterCommit(String fileUrl) {
-        if (!StringUtils.hasText(fileUrl)) {
-            return;
-        }
-
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            deleteStoredFileIfNeeded(fileUrl);
-            return;
-        }
-
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                deleteStoredFileIfNeeded(fileUrl);
-            }
-        });
-    }
-
-    private void deleteStoredFileIfNeeded(String fileUrl) {
-        if (!StringUtils.hasText(fileUrl)) {
-            return;
-        }
-
-        if (!fileUrl.startsWith(portfolioUploadUrlPrefix + "/")) {
-            return;
-        }
-
-        String filename = fileUrl.substring((portfolioUploadUrlPrefix + "/").length());
-        if (!StringUtils.hasText(filename)) {
-            return;
-        }
-
-        Path target = portfolioUploadDirectory.resolve(filename).normalize();
-        if (!target.startsWith(portfolioUploadDirectory)) {
-            return;
-        }
-
-        try {
-            Files.deleteIfExists(target);
-        } catch (IOException ignored) {
-            // Ignore cleanup failures after delete.
-        }
-    }
-
     private Map<Long, Long> getLikeCounts(Collection<Long> portfolioIds) {
         if (portfolioIds.isEmpty()) {
             return Collections.emptyMap();
@@ -406,19 +314,6 @@ public class PortfolioService {
         return StringUtils.hasText(value) ? CareerRange.from(value) : null;
     }
 
-    private String extractExtension(String filename) {
-        if (!filename.contains(".")) {
-            throw new IllegalArgumentException("업로드 파일 형식이 올바르지 않습니다.");
-        }
-
-        String extension = filename.substring(filename.lastIndexOf('.') + 1).toLowerCase();
-        if (!ALLOWED_EXTENSIONS.contains(extension)) {
-            throw new IllegalArgumentException("지원하지 않는 포트폴리오 파일 형식입니다.");
-        }
-
-        return extension;
-    }
-
     private String requireText(String value, String message) {
         if (!StringUtils.hasText(value)) {
             throw new IllegalArgumentException(message);
@@ -427,18 +322,12 @@ public class PortfolioService {
     }
 
     private void validateLength(String value, int maxLength, String message) {
-        if (value != null && value.length() > maxLength) {
+        if (value.length() > maxLength) {
             throw new IllegalArgumentException(message);
         }
     }
 
     private String normalizeOptionalText(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
-    }
-
-    private record StoredFile(
-            String fileUrl,
-            String originalFileName
-    ) {
     }
 }

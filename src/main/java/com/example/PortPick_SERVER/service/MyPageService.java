@@ -116,7 +116,7 @@ public class MyPageService {
 
     private User getUser(String email) {
         if (!StringUtils.hasText(email)) {
-            throw new IllegalArgumentException("인증 정보가 필요합니다.");
+            throw new IllegalStateException("Authenticated email is missing.");
         }
 
         return userRepository.findByEmail(email)
