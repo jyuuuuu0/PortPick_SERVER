@@ -31,7 +31,7 @@ public class FileStorageService {
 
             return urlPrefix + "/" + savedFilename;
         } catch (IOException e) {
-            throw new IllegalStateException(uploadErrorMessage);
+            throw new IllegalStateException(uploadErrorMessage, e);
         }
     }
 
