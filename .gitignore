@@ -40,3 +40,7 @@ uploads/
 ### My Secret Files ###
 src/main/resources/application-secret.properties
 .env
+
+### Build Artifacts ###
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
