@@ -44,3 +44,7 @@ src/main/resources/application-secret.properties
 ### Build Artifacts ###
 *.jar
 !gradle/wrapper/gradle-wrapper.jar
+
+### 하네스 작업 폴더 ###
+_workspace/
+_workspace_prev/
