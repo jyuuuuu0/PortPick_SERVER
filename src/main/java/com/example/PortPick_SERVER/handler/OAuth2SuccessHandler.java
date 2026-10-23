@@ -27,7 +27,7 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
 
     public OAuth2SuccessHandler(
             JwtProvider jwtProvider,
-            @Value("${app.oauth2.authorized-redirect-url:http://localhost:8081/}") String authorizedRedirectUrl,
+            @Value("${app.oauth2.authorized-redirect-url:http://localhost:3000/}") String authorizedRedirectUrl,
             @Value("${app.auth.cookie-name:PORTPICK_ACCESS_TOKEN}") String authCookieName,
             @Value("${app.auth.cookie-secure:false}") boolean cookieSecure) {
         this.jwtProvider = jwtProvider;
