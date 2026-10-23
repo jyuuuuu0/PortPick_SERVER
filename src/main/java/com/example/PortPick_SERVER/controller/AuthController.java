@@ -21,14 +21,18 @@ public class AuthController {
     private final AuthService authService;
     private final String authCookieName;
     private final boolean cookieSecure;
+    private final String cookieSameSite;
 
     public AuthController(
             AuthService authService,
             @Value("${app.auth.cookie-name:PORTPICK_ACCESS_TOKEN}") String authCookieName,
-            @Value("${app.auth.cookie-secure:false}") boolean cookieSecure) {
+            @Value("${app.auth.cookie-secure:false}") boolean cookieSecure,
+            @Value("${app.auth.cookie-same-site:Lax}") String cookieSameSite) {
         this.authService = authService;
         this.authCookieName = authCookieName;
-        this.cookieSecure = cookieSecure;
+        // SameSite=None 쿠키는 Secure가 없으면 브라우저가 거부하므로 함께 켠다.
+        this.cookieSecure = cookieSecure || "None".equalsIgnoreCase(cookieSameSite);
+        this.cookieSameSite = cookieSameSite;
     }
 
     @GetMapping("/me")
@@ -49,7 +53,7 @@ public class AuthController {
         ResponseCookie deleteCookie = ResponseCookie.from(authCookieName, "")
                 .httpOnly(true)
                 .secure(cookieSecure)
-                .sameSite("Lax")
+                .sameSite(cookieSameSite)
                 .path("/")
                 .maxAge(0)
                 .build();

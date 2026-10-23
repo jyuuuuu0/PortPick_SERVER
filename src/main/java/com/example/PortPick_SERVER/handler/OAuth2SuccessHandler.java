@@ -24,16 +24,20 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
     private final String authorizedRedirectUrl;
     private final String authCookieName;
     private final boolean cookieSecure;
+    private final String cookieSameSite;
 
     public OAuth2SuccessHandler(
             JwtProvider jwtProvider,
-            @Value("${app.oauth2.authorized-redirect-url:http://localhost:8081/}") String authorizedRedirectUrl,
+            @Value("${app.oauth2.authorized-redirect-url:http://localhost:3000/}") String authorizedRedirectUrl,
             @Value("${app.auth.cookie-name:PORTPICK_ACCESS_TOKEN}") String authCookieName,
-            @Value("${app.auth.cookie-secure:false}") boolean cookieSecure) {
+            @Value("${app.auth.cookie-secure:false}") boolean cookieSecure,
+            @Value("${app.auth.cookie-same-site:Lax}") String cookieSameSite) {
         this.jwtProvider = jwtProvider;
         this.authorizedRedirectUrl = authorizedRedirectUrl;
         this.authCookieName = authCookieName;
-        this.cookieSecure = cookieSecure;
+        // SameSite=None 쿠키는 Secure가 없으면 브라우저가 거부하므로 함께 켠다.
+        this.cookieSecure = cookieSecure || "None".equalsIgnoreCase(cookieSameSite);
+        this.cookieSameSite = cookieSameSite;
     }
 
     @Override
@@ -56,7 +60,7 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
         ResponseCookie authCookie = ResponseCookie.from(authCookieName, accessToken)
                 .httpOnly(true)
                 .secure(cookieSecure)
-                .sameSite("Lax")
+                .sameSite(cookieSameSite)
                 .path("/")
                 .maxAge(Duration.ofMillis(jwtProvider.getExpirationTime()))
                 .build();
