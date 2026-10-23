@@ -17,7 +17,7 @@ public class OAuth2FailureHandler extends SimpleUrlAuthenticationFailureHandler 
     private final String failureRedirectUrl;
 
     public OAuth2FailureHandler(
-            @Value("${app.oauth2.failure-redirect-url:http://localhost:8081/}") String failureRedirectUrl) {
+            @Value("${app.oauth2.failure-redirect-url:http://localhost:3000/}") String failureRedirectUrl) {
         this.failureRedirectUrl = failureRedirectUrl;
     }
 
