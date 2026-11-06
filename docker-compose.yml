@@ -32,6 +32,10 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+    volumes:
+      # 업로드한 프로필 이미지·포트폴리오 파일을 재배포 후에도 유지
+      - uploads_data:/app/uploads
 
 volumes:
   mysql_data:
+  uploads_data:
