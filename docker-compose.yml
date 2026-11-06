@@ -17,6 +17,10 @@ services:
 
   app:
     build: .
+    # .env의 GOOGLE_*, JWT_SECRET, APP_* 등을 컨테이너에 전달 (아래 environment 값이 우선 적용)
+    env_file:
+      - path: .env
+        required: false
     ports:
       - "8082:8082"
     depends_on:
